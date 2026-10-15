@@ -1,3 +1,4 @@
+
 package com.bhagwat.saas.security;
 
 import com.bhagwat.saas.tenant.TenantContext;
@@ -30,56 +31,52 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             FilterChain filterChain)
             throws ServletException, IOException {
 
-        String authHeader = request.getHeader("Authorization");
-
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-
-        String token = authHeader.substring(7);
-
         try {
+            String authHeader = request.getHeader("Authorization");
 
-            if (jwtService.isTokenValid(token)) {
+            if (authHeader != null && authHeader.startsWith("Bearer ")) {
+                String token = authHeader.substring(7);
 
-                Claims claims = jwtService.extractAllClaims(token);
+                if (jwtService.isTokenValid(token)) {
+                    Claims claims = jwtService.extractAllClaims(token);
 
-                String email = claims.getSubject();
+                    String email = claims.getSubject();
+                    Long tenantId = claims.get("tenantId", Long.class);
+                    String roles = claims.get("roles", String.class);
 
-                Long tenantId = claims.get("tenantId", Long.class);
+                    if (email != null
+                            && !email.isBlank()
+                            && tenantId != null
+                            && roles != null
+                            && !roles.isBlank()) {
 
-                TenantContext.setTenantId(tenantId);
+                        List<SimpleGrantedAuthority> authorities =
+                                Arrays.stream(roles.split(","))
+                                        .map(String::trim)
+                                        .filter(role -> !role.isBlank())
+                                        .map(role -> new SimpleGrantedAuthority(
+                                                "ROLE_" + role))
+                                        .toList();
 
-                String roles = claims.get("roles", String.class);
+                        if (!authorities.isEmpty()) {
+                            TenantContext.setTenantId(tenantId);
 
-                List<SimpleGrantedAuthority> authorities =
-                        Arrays.stream(roles.split(","))
-                                .map(role ->
-                                        new SimpleGrantedAuthority(
-                                                "ROLE_" + role
-                                        )
-                                )
-                                .toList();
+                            UsernamePasswordAuthenticationToken authentication =
+                                    new UsernamePasswordAuthenticationToken(
+                                            email,
+                                            null,
+                                            authorities);
 
-                UsernamePasswordAuthenticationToken authentication =
-                        new UsernamePasswordAuthenticationToken(
-                                email,
-                                null,
-                                authorities
-                        );
-
-                SecurityContextHolder
-                        .getContext()
-                        .setAuthentication(authentication);
+                            SecurityContextHolder.getContext()
+                                    .setAuthentication(authentication);
+                        }
+                    }
+                }
             }
 
-            // Execute the filter chain EXACTLY ONCE
             filterChain.doFilter(request, response);
 
         } finally {
-
-            // Clean up ThreadLocal after request completes
             TenantContext.clear();
             SecurityContextHolder.clearContext();
         }
